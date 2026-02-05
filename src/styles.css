@@ -1,0 +1,162 @@
+:root {
+  color-scheme: light;
+  font-family: "Bahnschrift", "Trebuchet MS", sans-serif;
+  background: radial-gradient(circle at top, #f1f5ff, #fdf7f2 55%, #f8efe9);
+  color: #1a1a1a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+.app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 48px 24px 72px;
+}
+
+.hero {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 32px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 32px;
+  border-radius: 24px;
+  background: linear-gradient(135deg, rgba(26, 26, 26, 0.9), rgba(46, 46, 46, 0.95));
+  color: #fdf7f2;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18);
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 0.8rem;
+  margin: 0 0 12px;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.hero h1 {
+  margin: 0 0 8px;
+  font-size: clamp(2rem, 3vw, 2.8rem);
+}
+
+.subtitle {
+  margin: 0;
+  max-width: 420px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.status {
+  padding: 16px 20px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.08);
+  min-width: 180px;
+}
+
+.status span {
+  display: block;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.status strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 1rem;
+}
+
+.panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 24px;
+  margin: 32px 0;
+}
+
+.login,
+.token {
+  padding: 24px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 20px 40px rgba(15, 15, 15, 0.08);
+  display: grid;
+  gap: 16px;
+}
+
+label {
+  display: block;
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #3b3b3b;
+  margin-bottom: 6px;
+}
+
+input,
+textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  font-size: 1rem;
+}
+
+button {
+  border: none;
+  border-radius: 999px;
+  padding: 12px 18px;
+  background: #1f3b4d;
+  color: #fdf7f2;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(31, 59, 77, 0.2);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+}
+
+.card {
+  padding: 20px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 16px 36px rgba(15, 15, 15, 0.08);
+}
+
+.card h3 {
+  margin-top: 0;
+  margin-bottom: 10px;
+  font-size: 1rem;
+  color: #2a2a2a;
+}
+
+.card p {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 600;
+}
+
+@media (max-width: 720px) {
+  .hero {
+    padding: 24px;
+  }
+
+  .panel {
+    margin-top: 24px;
+  }
+}
