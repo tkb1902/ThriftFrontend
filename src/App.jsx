@@ -773,20 +773,17 @@ export default function App() {
     body.set("username", login.username);
     body.set("password", login.password);
 
-    const response = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body
-    });
-
-    if (!response.ok) {
-      setStatus("Login failed.");
-      return;
+    try {
+      const data = await apiFetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body
+      });
+      setToken(data.access_token);
+      setStatus("Signed in.");
+    } catch (error) {
+      setStatus(error.message || "Login failed.");
     }
-
-    const data = await response.json();
-    setToken(data.access_token);
-    setStatus("Signed in.");
   };
 
   const loadDashboard = async () => {
@@ -795,18 +792,15 @@ export default function App() {
       return;
     }
     setStatus("Loading dashboard...");
-    const response = await fetch("/api/reporting/dashboard", {
-      headers: authHeader
-    });
-
-    if (!response.ok) {
-      setStatus("Failed to load dashboard.");
-      return;
+    try {
+      const data = await apiFetch("/api/reporting/dashboard", {
+        headers: authHeader
+      });
+      setSummary(data);
+      setStatus("Dashboard updated.");
+    } catch (error) {
+      setStatus(error.message || "Failed to load dashboard.");
     }
-
-    const data = await response.json();
-    setSummary(data);
-    setStatus("Dashboard updated.");
   };
 
   const handleVolunteerRegister = async (event) => {
