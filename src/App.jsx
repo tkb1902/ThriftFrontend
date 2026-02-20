@@ -1,4 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import { CartProvider } from "./cart";
+import Sidebar from "./components/Sidebar";
+import RightPanel from "./components/RightPanel";
+import CartPanel from "./components/CartPanel";
+import AddToCartButton from "./components/AddToCartButton";
+import QRCode from "qrcode";
 import {
   FiBarChart2,
   FiBox,
@@ -9,6 +15,12 @@ import {
   FiUsers
 } from "react-icons/fi";
 import { apiFetch } from "./api";
+import Promotions from "./components/Promotions";
+import Sales from "./components/Sales";
+import Donors from "./components/Donors";
+import Shifts from "./components/Shifts";
+import Productivity from "./components/Productivity";
+import Goals from "./components/Goals";
 
 const emptySummary = {
   total_donations: 0,
@@ -61,9 +73,15 @@ const timeBuckets = [
 
 const navItems = [
   { id: "pos", label: "POS", icon: FiShoppingCart },
+  { id: "promotions", label: "Promotions", icon: FiBarChart2 },
   { id: "inventory", label: "Inventory", icon: FiBox },
+  { id: "donors", label: "Donors", icon: FiUser },
+  { id: "shifts", label: "Shifts", icon: FiUsers },
+  { id: "productivity", label: "Productivity", icon: FiBarChart2 },
+  { id: "goals", label: "Goals", icon: FiBarChart2 },
   { id: "donations", label: "Donations", icon: FiGift },
   { id: "volunteers", label: "Volunteers", icon: FiUsers },
+  { id: "sales", label: "Sales", icon: FiShoppingCart },
   { id: "reporting", label: "Reporting", icon: FiBarChart2 }
 ];
 
@@ -89,6 +107,16 @@ export default function App() {
   const [categoriesLoaded, setCategoriesLoaded] = useState(false);
   const [donationItems, setDonationItems] = useState([]);
   const [donationsLoaded, setDonationsLoaded] = useState(false);
+  const [donors, setDonors] = useState([]);
+  const [donorsLoaded, setDonorsLoaded] = useState(false);
+  const [donationForm, setDonationForm] = useState({
+    donorId: "",
+    donorName: "",
+    receivedAt: "",
+    description: "",
+    estimatedValue: "",
+    items: []
+  });
   const [volunteerEntries, setVolunteerEntries] = useState([]);
   const [volunteersLoaded, setVolunteersLoaded] = useState(false);
   const [volunteerRoster, setVolunteerRoster] = useState([]);
@@ -98,7 +126,9 @@ export default function App() {
     password: "",
     fullName: "",
     email: "",
-    phone: ""
+    phone: "",
+    role: "",
+    status: "ACTIVE"
   });
   const [volunteerMessage, setVolunteerMessage] = useState("");
   const [volunteerOpsUserId, setVolunteerOpsUserId] = useState("");
@@ -122,6 +152,36 @@ export default function App() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [compactTables, setCompactTables] = useState(false);
   const [seedMessage, setSeedMessage] = useState("");
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const [globalTaxRate, setGlobalTaxRate] = useState(0);
+  const [globalDiscountPercent, setGlobalDiscountPercent] = useState(0);
+  const [itemDiscounts, setItemDiscounts] = useState({});
+  const [qrOpen, setQrOpen] = useState(false);
+  const [qrItem, setQrItem] = useState(null);
+  const [qrDataUrl, setQrDataUrl] = useState("");
+
+  const generateQrForItem = async (item) => {
+    try {
+      const full = inventoryItems.find((i) => i.id === item.id) || item;
+      const payload = {
+        id: full.id,
+        name: full.name,
+        description: full.description,
+        category: full.category_name || full.category,
+        condition: full.condition,
+        price: full.price ?? full.rawPrice ?? null,
+        status: full.status
+      };
+      const text = JSON.stringify(payload);
+      const url = await QRCode.toDataURL(text, { margin: 1 });
+      setQrDataUrl(url);
+      setQrItem(payload);
+    } catch (err) {
+      setStatus(err.message || "Failed to generate QR.");
+    }
+  };
+
+  // Cart is provided by CartProvider (in ./cart.jsx)
 
   useEffect(() => {
     const handleResize = () => {
@@ -231,36 +291,30 @@ export default function App() {
       const status = sameDay ? "Today" : inWeek ? "This week" : "Older";
 
       return {
+        id: donation.id,
         donor: donation.donor_name || "Anonymous",
         receivedAt: validDate ? validDate.toLocaleString() : "Unknown",
         receivedBy: `User #${donation.received_by_user_id}`,
         items: "-",
-        status,
-        isToday: Boolean(sameDay),
-        isWeek: Boolean(inWeek),
-        isOlder: Boolean(!sameDay && !inWeek)
+        status
       };
     });
   }, [donationItems]);
 
   const filteredDonations = useMemo(() => {
-    if (donationFilter === "all") {
-      return donationRows;
-    }
-    if (donationFilter === "today") {
-      return donationRows.filter((donation) => donation.isToday);
-    }
-    if (donationFilter === "week") {
-      return donationRows.filter((donation) => donation.isWeek);
-    }
-    return donationRows.filter((donation) => donation.isOlder);
+    if (donationFilter === "all") return donationRows;
+    return donationRows.filter((d) => {
+      if (donationFilter === "today") return d.status === "Today";
+      if (donationFilter === "week") return d.status === "This week";
+      if (donationFilter === "older") return d.status === "Older";
+      return true;
+    });
   }, [donationFilter, donationRows]);
 
   const donationFilterSummary =
     donationFilter === "all"
       ? "All donations"
-      : donationFilters.find((filter) => filter.id === donationFilter)?.label ||
-        "Filtered";
+      : donationFilters.find((filter) => filter.id === donationFilter)?.label || "Filtered";
 
   const volunteerRows = useMemo(() => {
     const now = Date.now();
@@ -645,6 +699,28 @@ export default function App() {
   }, [activeView, authHeader, token]);
 
   useEffect(() => {
+    if (!token) {
+      setDonors([]);
+      setDonorsLoaded(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    apiFetch("/api/donors", { headers: authHeader, signal: controller.signal })
+      .then((data) => {
+        setDonors(Array.isArray(data) ? data : []);
+        setDonorsLoaded(true);
+      })
+      .catch((error) => {
+        if (error.name === "AbortError") return;
+        setDonorsLoaded(true);
+        setStatus(error.message || "Failed to load donors.");
+      });
+
+    return () => controller.abort();
+  }, [authHeader, token]);
+
+  useEffect(() => {
     if (!token || activeView !== "volunteers") {
       setVolunteerEntries([]);
       setVolunteersLoaded(false);
@@ -676,7 +752,8 @@ export default function App() {
   }, [activeView, authHeader, token]);
 
   useEffect(() => {
-    if (!token || activeView !== "volunteers") {
+    // ensure volunteer roster is available for both the volunteers and shifts screens
+    if (!token || (activeView !== "volunteers" && activeView !== "shifts")) {
       setVolunteerRoster([]);
       setVolunteerRosterLoaded(false);
       return;
@@ -781,6 +858,7 @@ export default function App() {
       });
       setToken(data.access_token);
       setStatus("Signed in.");
+      setLoginModalOpen(false);
     } catch (error) {
       setStatus(error.message || "Login failed.");
     }
@@ -829,7 +907,9 @@ export default function App() {
           password: volunteerForm.password,
           full_name: volunteerForm.fullName,
           email: volunteerForm.email,
-          phone: volunteerForm.phone
+          phone: volunteerForm.phone,
+          role: volunteerForm.role,
+          status: volunteerForm.status
         })
       });
       setVolunteerRoster((prev) => [created, ...prev]);
@@ -975,7 +1055,7 @@ export default function App() {
     }
   };
 
-  const handleSaleSubmit = async (event) => {
+  const handleSaleSubmit = async (event, buyerName = null, buyerPhone = null, method = null, paymentId = null) => {
     event.preventDefault();
     setPosMessage("");
 
@@ -992,22 +1072,34 @@ export default function App() {
 
     try {
       setStatus("Processing sale...");
+      const body = {
+        inventory_item_id: posSelection.id,
+        sale_price: salePrice
+      };
+      if (buyerName) body.buyer_name = buyerName;
+      if (buyerPhone) body.buyer_phone = buyerPhone;
+      if (method) body.method = method;
+      if (paymentId) body.payment_id = paymentId;
+
       await apiFetch("/api/sales", {
         method: "POST",
         headers: {
           ...authHeader,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({
-          inventory_item_id: posSelection.id,
-          sale_price: salePrice
-        })
+        body: JSON.stringify(body)
       });
       setPosMessage("Sale recorded.");
       setPosPrice("");
       setPosSelection(null);
       const refreshed = await fetchInventory({ view: "pos" });
       setInventoryItems(refreshed);
+      if (qrOpen && qrItem && inventorySelection && qrItem.id === inventorySelection.id) {
+        const refreshedItem = refreshed.find((it) => it.id === inventorySelection.id);
+        if (refreshedItem) {
+          generateQrForItem(refreshedItem);
+        }
+      }
       setStatus("Inventory updated.");
     } catch (error) {
       setPosMessage(error.message || "Failed to record sale.");
@@ -1072,6 +1164,72 @@ export default function App() {
       setInventoryActionMessage(error.message || "Failed to create item.");
       setStatus("Inventory update failed.");
     }
+  };
+
+  const handleDonationIntake = async (event) => {
+    event.preventDefault();
+    setStatus("");
+    setInventoryActionMessage("");
+    if (!token) {
+      setStatus("Sign in to record donations.");
+      return;
+    }
+    if (!donationForm.items.length) {
+      setStatus("Add at least one item to the donation.");
+      return;
+    }
+
+    const payload = {
+      donor_name: donationForm.donorName || undefined,
+      donor_id: donationForm.donorId ? Number(donationForm.donorId) : undefined,
+      received_at: donationForm.receivedAt || undefined,
+      items: donationForm.items.map((it) => ({
+        category_id: Number(it.categoryId),
+        name: it.name,
+        description: it.description || undefined,
+        condition: it.condition,
+        price: Number(it.price)
+      }))
+    };
+
+    try {
+      setStatus("Recording donation...");
+      await apiFetch("/api/donations/intake", {
+        method: "POST",
+        headers: { ...authHeader, "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      setStatus("Donation recorded.");
+      // refresh donations and inventory
+      const refreshed = await fetchInventory({ view: "inventory" });
+      setInventoryItems(refreshed);
+      const donations = await apiFetch("/api/donations", { headers: authHeader });
+      setDonationItems(Array.isArray(donations) ? donations : []);
+      setDonationsLoaded(true);
+      setDonationForm({ donorId: "", donorName: "", receivedAt: "", description: "", estimatedValue: "", items: [] });
+    } catch (err) {
+      setStatus(err.message || "Failed to record donation.");
+    }
+  };
+
+  const addDonationItem = () => {
+    setDonationForm((prev) => ({ ...prev, items: [...prev.items, { categoryId: "", name: "", description: "", condition: "", price: "" }] }));
+  };
+
+  const updateDonationItem = (index, changes) => {
+    setDonationForm((prev) => {
+      const items = [...prev.items];
+      items[index] = { ...items[index], ...changes };
+      return { ...prev, items };
+    });
+  };
+
+  const removeDonationItem = (index) => {
+    setDonationForm((prev) => {
+      const items = [...prev.items];
+      items.splice(index, 1);
+      return { ...prev, items };
+    });
   };
 
   const handleInventoryUpdate = async () => {
@@ -1143,6 +1301,7 @@ export default function App() {
           <span>Intake</span>
           <span>Price</span>
           <span>Status</span>
+          <span>Actions</span>
         </div>
         {filteredInventoryRows.length ? (
           filteredInventoryRows.map((product, index) => (
@@ -1182,6 +1341,34 @@ export default function App() {
               <span className={`status-pill ${product.status.toLowerCase()}`}>
                 {product.status}
               </span>
+              <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={itemDiscounts[product.id] ?? 0}
+                  onChange={(e) => {
+                    const v = Number(e.target.value || 0);
+                    setItemDiscounts((prev) => ({ ...prev, [product.id]: Math.max(0, Math.min(100, v)) }));
+                  }}
+                  aria-label="Item discount %"
+                  style={{ width: 64 }}
+                />
+                <AddToCartButton item={product} discountPercent={itemDiscounts[product.id] ?? 0} />
+                <button
+                  className="ghost small"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setQrOpen(true);
+                    setQrItem(product);
+                    generateQrForItem(product);
+                  }}
+                  aria-label={`Generate QR for ${product.name}`}
+                >
+                  QR
+                </button>
+              </span>
             </div>
           ))
         ) : (
@@ -1196,50 +1383,24 @@ export default function App() {
   );
 
   return (
-    <div className="pos-shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark">MF</div>
-          <div>
-            <p>MissionFlow</p>
-            <span>Thrift POS</span>
-          </div>
-        </div>
-        <div className="sidebar-profile">
-          <div className="avatar">
-            {currentUser?.username
-              ? currentUser.username.slice(0, 2).toUpperCase()
-              : "??"}
-          </div>
-          <div>
-            <strong>{currentUser?.username || "Not signed in"}</strong>
-            <span>{currentUser?.role || ""}</span>
-            {token ? (
-              <button type="button" className="link" onClick={() => setToken("")}
-                ><FiLogOut /> Sign out</button>
-            ) : null}
-          </div>
-        </div>
-        <nav className="nav">
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              className={
-                item.id === activeView ? "nav-item active" : "nav-item"
-              }
-              type="button"
-              onClick={() => setActiveView(item.id)}
-            >
-              <item.icon />
-              {item.label}
-            </button>
-          ))}
-        </nav>
-        <div className="sidebar-footer">
-          <p>Active shift</p>
-          <strong>Open register</strong>
-        </div>
-      </aside>
+    <CartProvider>
+      <div className="pos-shell">
+      <Sidebar
+        currentUser={currentUser}
+        token={token}
+        setToken={setToken}
+        navItems={navItems}
+        activeView={activeView}
+        setActiveView={setActiveView}
+        onOpenLogin={() => setLoginModalOpen(true)}
+      />
+      {activeView === "pos" ? (
+        <CartPanel
+          taxRate={globalTaxRate}
+          globalDiscountPercent={globalDiscountPercent}
+          itemDiscounts={itemDiscounts}
+        />
+      ) : null}
 
       <main className="content">
         {activeView === "inventory" ? (
@@ -1360,6 +1521,14 @@ export default function App() {
               onSelect: setInventorySelection
             })}
           </>
+        ) : activeView === "donors" ? (
+          <Donors authHeader={authHeader} />
+        ) : activeView === "shifts" ? (
+          <Shifts authHeader={authHeader} volunteerRoster={volunteerRoster} />
+        ) : activeView === "productivity" ? (
+          <Productivity authHeader={authHeader} />
+        ) : activeView === "goals" ? (
+          <Goals authHeader={authHeader} />
         ) : activeView === "donations" ? (
           <>
             <header className="topbar">
@@ -1427,6 +1596,92 @@ export default function App() {
                 Clear filters
               </button>
             </div>
+
+            <section style={{ display: 'flex', gap: 12, marginTop: 12 }}>
+              <div style={{ minWidth: 320, maxWidth: 480 }}>
+                <h3>Recent donations</h3>
+                <div className="table">
+                  <div className="table-head"><span>Donor</span><span>Received</span><span>Received by</span><span>Items</span></div>
+                  {donationItems.map((donation) => (
+                    <div key={donation.id} className="table-row">
+                      <div>
+                        <strong>{donation.donor_name || 'Anonymous'}</strong>
+                        <p className="helper">{donation.id}</p>
+                      </div>
+                      <span>{new Date(donation.received_at).toLocaleString()}</span>
+                      <span>{`User #${donation.received_by_user_id}`}</span>
+                      <span>-</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <form onSubmit={handleDonationIntake} style={{ flex: 1, minWidth: 360 }}>
+                <label>
+                  Donor
+                  <select value={donationForm.donorId} onChange={(e) => { setDonationForm((p) => ({ ...p, donorId: e.target.value, donorName: '' })); }}>
+                    <option value="">-- Anonymous / select donor --</option>
+                    {donors.map((d) => (
+                      <option key={d.id} value={d.id}>{d.full_name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Donor name (if not selected)
+                  <input value={donationForm.donorName} onChange={(e) => setDonationForm((p) => ({ ...p, donorName: e.target.value }))} placeholder="Optional" />
+                </label>
+                <label>
+                  Received at
+                  <input
+                    type="datetime-local"
+                    value={donationForm.receivedAt}
+                    onChange={(e) => setDonationForm((p) => ({ ...p, receivedAt: e.target.value }))}
+                    onFocus={() => {
+                      if (!donationForm.receivedAt) {
+                        const d = new Date();
+                        // build local YYYY-MM-DDTHH:MM
+                        const pad = (n) => String(n).padStart(2, '0');
+                        const local = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                        setDonationForm((p) => ({ ...p, receivedAt: local }));
+                      }
+                    }}
+                  />
+                </label>
+                <label>
+                  Description
+                  <input value={donationForm.description} onChange={(e) => setDonationForm((p) => ({ ...p, description: e.target.value }))} />
+                </label>
+                <label>
+                  Estimated total value
+                  <input value={donationForm.estimatedValue} onChange={(e) => setDonationForm((p) => ({ ...p, estimatedValue: e.target.value }))} placeholder="Optional" />
+                </label>
+                <div style={{ marginTop: 8 }}>
+                  <strong>Items</strong>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+                    {donationForm.items.map((it, idx) => (
+                      <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <select required value={it.categoryId} onChange={(e) => updateDonationItem(idx, { categoryId: e.target.value })} style={{ flex: '1 1 160px' }}>
+                            <option value="">Category</option>
+                            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
+                          <input required placeholder="Name" value={it.name} onChange={(e) => updateDonationItem(idx, { name: e.target.value })} style={{ flex: '2 1 260px' }} />
+                          <input placeholder="Condition" value={it.condition} onChange={(e) => updateDonationItem(idx, { condition: e.target.value })} style={{ width: 140 }} />
+                          <input required type="number" min="0" step="0.01" placeholder="Price" value={it.price} onChange={(e) => updateDonationItem(idx, { price: e.target.value })} style={{ width: 100 }} />
+                          <button type="button" className="ghost" onClick={() => removeDonationItem(idx)}>Remove</button>
+                          <textarea placeholder="Description" value={it.description} onChange={(e) => updateDonationItem(idx, { description: e.target.value })} rows={1} style={{ flex: '1 1 100%', minWidth: 200 }} />
+                        </div>
+                    ))}
+                    <div>
+                      <button type="button" className="ghost" onClick={addDonationItem}>Add item</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 8 }}>
+                  <button className="primary" type="submit">Record donation</button>
+                </div>
+              </form>
+            </section>
 
             <section className="chart-card donations">
               <div className="panel-head">
@@ -1618,6 +1873,10 @@ export default function App() {
               </div>
             </section>
           </>
+        ) : activeView === "promotions" ? (
+          <Promotions inventoryItems={inventoryItems} />
+        ) : activeView === "sales" ? (
+          <Sales authHeader={authHeader} />
         ) : activeView === "reporting" ? (
           <>
             <header className="topbar">
@@ -1771,38 +2030,85 @@ export default function App() {
             })}
           </>
         )}
-      </main>
 
-      <aside className={panelOpen ? "order-panel panel-open" : "order-panel"}>
-        <div className="panel-card">
-          <div className="panel-head">
-            <h2 className="with-icon"><FiUser /> Staff Session</h2>
-            <span
-              className={`status-pill${status.toLowerCase().includes("loading") ? " loading" : ""}`}
-            >
-              {status}
-            </span>
-          </div>
-          {token ? (
-            <div className="session-form">
-              <div>
-                <strong>{currentUser?.username || "Signed in"}</strong>
-                <p className="helper">Role: {currentUser?.role || "staff"}</p>
+        {qrOpen && (
+          <div style={{position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200}} onClick={() => { setQrOpen(false); setQrItem(null); setQrDataUrl(''); }}>
+            <div role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} style={{ background: '#fff', padding: 20, borderRadius: 8, width: 360, maxWidth: '95%' }}>
+              <h3 style={{ marginTop: 0 }}>QR Code for {qrItem?.name || 'item'}</h3>
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 260 }}>
+                {qrDataUrl ? (
+                  <img src={qrDataUrl} alt="QR code" style={{ width: 240, height: 240 }} />
+                ) : (
+                  <div>Generating...</div>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+                <button className="ghost" type="button" onClick={() => generateQrForItem(qrItem)}>Regenerate</button>
+                <button className="ghost" type="button" onClick={() => { if (qrDataUrl) { navigator.clipboard?.writeText(qrDataUrl); } }}>Copy image URL</button>
+                <button className="primary" type="button" onClick={() => { setQrOpen(false); setQrItem(null); setQrDataUrl(''); }}>Close</button>
               </div>
             </div>
-          ) : (
-            <form className="session-form" onSubmit={handleLogin}>
+          </div>
+        )}
+
+      </main>
+
+      <RightPanel
+        panelOpen={panelOpen}
+        status={status}
+        token={token}
+        currentUser={currentUser}
+        login={login}
+        setLogin={setLogin}
+        handleLogin={handleLogin}
+        loadDashboard={loadDashboard}
+        activeView={activeView}
+        inventorySelection={inventorySelection}
+        handleInventoryCreate={handleInventoryCreate}
+        inventoryForm={inventoryForm}
+        setInventoryForm={setInventoryForm}
+        categories={categories}
+        categoriesLoaded={categoriesLoaded}
+        inventoryActionMessage={inventoryActionMessage}
+        handleInventoryUpdate={handleInventoryUpdate}
+        setInventorySelection={setInventorySelection}
+        setInventoryActionMessage={setInventoryActionMessage}
+        categoryForm={categoryForm}
+        setCategoryForm={setCategoryForm}
+        categoryMessage={categoryMessage}
+        handleCategoryCreate={handleCategoryCreate}
+        volunteerOpsMessage={volunteerOpsMessage}
+        handleVolunteerClockIn={handleVolunteerClockIn}
+        handleVolunteerClockOut={handleVolunteerClockOut}
+        volunteerRosterLoaded={volunteerRosterLoaded}
+        volunteerRoster={volunteerRoster}
+        volunteerOpsUserId={volunteerOpsUserId}
+        setVolunteerOpsUserId={setVolunteerOpsUserId}
+        handleVolunteerRegister={handleVolunteerRegister}
+        volunteerForm={volunteerForm}
+        setVolunteerForm={setVolunteerForm}
+        volunteerMessage={volunteerMessage}
+        seedMessage={seedMessage}
+        handleAdminSeed={handleAdminSeed}
+        inventoryTotals={inventoryTotals}
+        donationTotals={donationTotals}
+        volunteerTotals={volunteerTotals}
+        handleSaleSubmit={handleSaleSubmit}
+        posSelection={posSelection}
+        posPrice={posPrice}
+        setPosPrice={setPosPrice}
+        posMessage={posMessage}
+      />
+      {loginModalOpen ? (
+        <div className="modal-backdrop">
+          <div className="modal" role="dialog" aria-modal="true">
+            <h2>Sign in</h2>
+            <form onSubmit={handleLogin}>
               <label>
                 Username
                 <input
                   value={login.username}
-                  onChange={(event) =>
-                    setLogin((prev) => ({
-                      ...prev,
-                      username: event.target.value
-                    }))
-                  }
-                  placeholder="manager"
+                  onChange={(e) => setLogin((prev) => ({ ...prev, username: e.target.value }))}
                 />
               </label>
               <label>
@@ -1810,440 +2116,21 @@ export default function App() {
                 <input
                   type="password"
                   value={login.password}
-                  onChange={(event) =>
-                    setLogin((prev) => ({
-                      ...prev,
-                      password: event.target.value
-                    }))
-                  }
-                  placeholder="password"
+                  onChange={(e) => setLogin((prev) => ({ ...prev, password: e.target.value }))}
                 />
               </label>
-              <button className="primary" type="submit">
-                Sign in
-              </button>
-              <p className="helper">Accounts are created by managers only.</p>
+              <div className="modal-actions">
+                <button type="button" className="ghost" onClick={() => setLoginModalOpen(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="primary">
+                  Sign in
+                </button>
+              </div>
             </form>
-          )}
-          <div className="token-box">
-            <button className="ghost" type="button" onClick={loadDashboard}>
-              Sync reporting
-            </button>
           </div>
         </div>
-
-        {activeView === "inventory" && (
-          <div className="panel-card">
-            <div className="panel-head">
-              <h2>Inventory Editor</h2>
-              <span>{inventorySelection ? "Edit" : "New"}</span>
-            </div>
-            <form className="session-form" onSubmit={handleInventoryCreate}>
-              <label>
-                Donation ID (optional)
-                <input
-                  value={inventoryForm.donationId}
-                  onChange={(event) =>
-                    setInventoryForm((prev) => ({
-                      ...prev,
-                      donationId: event.target.value
-                    }))
-                  }
-                  placeholder="Donation ID or leave blank"
-                />
-              </label>
-              <p className="helper">Leave blank to record a manual intake item.</p>
-              <label>
-                Item name
-                <input
-                  value={inventoryForm.name}
-                  onChange={(event) =>
-                    setInventoryForm((prev) => ({
-                      ...prev,
-                      name: event.target.value
-                    }))
-                  }
-                  placeholder="Item name"
-                />
-              </label>
-              <label>
-                Description
-                <textarea
-                  value={inventoryForm.description}
-                  onChange={(event) =>
-                    setInventoryForm((prev) => ({
-                      ...prev,
-                      description: event.target.value
-                    }))
-                  }
-                  placeholder="Short description"
-                  rows={3}
-                />
-              </label>
-              <label>
-                Category
-                <select
-                  value={inventoryForm.categoryId}
-                  onChange={(event) =>
-                    setInventoryForm((prev) => ({
-                      ...prev,
-                      categoryId: event.target.value
-                    }))
-                  }
-                >
-                  <option value="">Select a category</option>
-                  {categories.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {categoriesLoaded && !categories.length ? (
-                <p className="helper">Add a category before creating items.</p>
-              ) : null}
-              <label>
-                Condition
-                <input
-                  value={inventoryForm.condition}
-                  onChange={(event) =>
-                    setInventoryForm((prev) => ({
-                      ...prev,
-                      condition: event.target.value
-                    }))
-                  }
-                  placeholder="Condition"
-                />
-              </label>
-              <label>
-                Price
-                <input
-                  value={inventoryForm.price}
-                  onChange={(event) =>
-                    setInventoryForm((prev) => ({
-                      ...prev,
-                      price: event.target.value
-                    }))
-                  }
-                  placeholder="$0.00"
-                />
-              </label>
-              {inventoryActionMessage ? (
-                <p className="pos-message">{inventoryActionMessage}</p>
-              ) : null}
-              <div className="form-actions">
-                <button className="primary" type="submit">
-                  Create item
-                </button>
-                <button
-                  className="ghost"
-                  type="button"
-                  onClick={handleInventoryUpdate}
-                  disabled={!inventorySelection}
-                >
-                  Update item
-                </button>
-                <button
-                  className="ghost"
-                  type="button"
-                  onClick={() => {
-                    setInventorySelection(null);
-                    setInventoryForm({
-                      donationId: "",
-                      categoryId: "",
-                      name: "",
-                      description: "",
-                      condition: "",
-                      price: ""
-                    });
-                    setInventoryActionMessage("");
-                  }}
-                >
-                  Clear
-                </button>
-              </div>
-              <p className="helper">Updates require manager access.</p>
-            </form>
-          </div>
-        )}
-
-        {activeView === "inventory" && currentUser?.role === "manager" && (
-          <div className="panel-card">
-            <div className="panel-head">
-              <h2>Create Category</h2>
-              <span>{categoriesLoaded ? "Ready" : "Loading"}</span>
-            </div>
-            <form className="session-form" onSubmit={handleCategoryCreate}>
-              <label>
-                Category name
-                <input
-                  value={categoryForm.name}
-                  onChange={(event) =>
-                    setCategoryForm((prev) => ({
-                      ...prev,
-                      name: event.target.value
-                    }))
-                  }
-                  placeholder="e.g. Furniture"
-                />
-              </label>
-              <label>
-                Description
-                <textarea
-                  value={categoryForm.description}
-                  onChange={(event) =>
-                    setCategoryForm((prev) => ({
-                      ...prev,
-                      description: event.target.value
-                    }))
-                  }
-                  placeholder="Optional description"
-                  rows={3}
-                />
-              </label>
-              {categoryMessage ? <p className="helper">{categoryMessage}</p> : null}
-              <button className="primary" type="submit">
-                Add category
-              </button>
-            </form>
-          </div>
-        )}
-
-        {activeView === "volunteers" && currentUser?.role === "volunteer" && (
-          <div className="panel-card">
-            <div className="panel-head">
-              <h2>Volunteer Actions</h2>
-              <span>Self-service</span>
-            </div>
-            <div className="session-form">
-              {volunteerOpsMessage ? <p className="pos-message">{volunteerOpsMessage}</p> : null}
-              <div className="form-actions">
-                <button className="primary" type="button" onClick={handleVolunteerClockIn}>
-                  Clock in
-                </button>
-                <button className="ghost" type="button" onClick={handleVolunteerClockOut}>
-                  Clock out
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {activeView === "volunteers" && currentUser?.role !== "volunteer" && (
-          <div className="panel-card">
-            <div className="panel-head">
-              <h2>Volunteer Actions</h2>
-              <span>{volunteerRosterLoaded ? "Ready" : "Loading"}</span>
-            </div>
-            <div className="session-form">
-              <label>
-                Select volunteer
-                <select
-                  value={volunteerOpsUserId}
-                  onChange={(event) => setVolunteerOpsUserId(event.target.value)}
-                >
-                  <option value="">Choose a volunteer</option>
-                  {volunteerRoster.map((volunteer) => (
-                    <option key={volunteer.id} value={volunteer.id}>
-                      {volunteer.full_name || volunteer.username}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {volunteerOpsMessage ? <p className="pos-message">{volunteerOpsMessage}</p> : null}
-              <div className="form-actions">
-                <button className="primary" type="button" onClick={handleVolunteerClockIn}>
-                  Clock in
-                </button>
-                <button className="ghost" type="button" onClick={handleVolunteerClockOut}>
-                  Clock out
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {activeView === "volunteers" && currentUser?.role !== "volunteer" && (
-          <div className="panel-card">
-            <div className="panel-head">
-              <h2>Register Volunteer</h2>
-              <span>Manager or staff</span>
-            </div>
-            <form className="session-form" onSubmit={handleVolunteerRegister}>
-              <label>
-                Username
-                <input
-                  value={volunteerForm.username}
-                  onChange={(event) =>
-                    setVolunteerForm((prev) => ({
-                      ...prev,
-                      username: event.target.value
-                    }))
-                  }
-                  placeholder="volunteer.username"
-                />
-              </label>
-              <label>
-                Password
-                <input
-                  type="password"
-                  value={volunteerForm.password}
-                  onChange={(event) =>
-                    setVolunteerForm((prev) => ({
-                      ...prev,
-                      password: event.target.value
-                    }))
-                  }
-                  placeholder="Temporary password"
-                />
-              </label>
-              <label>
-                Full name
-                <input
-                  value={volunteerForm.fullName}
-                  onChange={(event) =>
-                    setVolunteerForm((prev) => ({
-                      ...prev,
-                      fullName: event.target.value
-                    }))
-                  }
-                  placeholder="Full name"
-                />
-              </label>
-              <label>
-                Email
-                <input
-                  value={volunteerForm.email}
-                  onChange={(event) =>
-                    setVolunteerForm((prev) => ({
-                      ...prev,
-                      email: event.target.value
-                    }))
-                  }
-                  placeholder="email@example.com"
-                />
-              </label>
-              <label>
-                Phone
-                <input
-                  value={volunteerForm.phone}
-                  onChange={(event) =>
-                    setVolunteerForm((prev) => ({
-                      ...prev,
-                      phone: event.target.value
-                    }))
-                  }
-                  placeholder="(555) 555-5555"
-                />
-              </label>
-              {volunteerMessage ? <p className="helper">{volunteerMessage}</p> : null}
-              <button className="primary" type="submit">
-                Register volunteer
-              </button>
-            </form>
-          </div>
-        )}
-
-        {activeView === "reporting" && currentUser?.role === "manager" && (
-          <div className="panel-card">
-            <div className="panel-head">
-              <h2>Developer Seed</h2>
-              <span>Manager only</span>
-            </div>
-            <div className="session-form">
-              <p className="helper">
-                Adds sample data across users, donations, inventory, sales, and volunteers.
-              </p>
-              {seedMessage ? <p className="pos-message">{seedMessage}</p> : null}
-              <button className="ghost" type="button" onClick={handleAdminSeed}>
-                Run full seed
-              </button>
-            </div>
-          </div>
-        )}
-
-        {activeView === "inventory" && (
-          <div className="panel-card">
-            <div className="panel-head">
-              <h2 className="with-icon"><FiBox /> Inventory Totals</h2>
-              <span>Today</span>
-            </div>
-            <div className="metric-grid">
-              {inventoryTotals.map((item) => (
-                <div key={item.label}>
-                  <span>{item.label}</span>
-                  <strong>{item.value}</strong>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {activeView === "donations" && (
-          <div className="panel-card">
-            <div className="panel-head">
-              <h2 className="with-icon"><FiGift /> Donation Totals</h2>
-              <span>Today</span>
-            </div>
-            <div className="metric-grid">
-              {donationTotals.map((item) => (
-                <div key={item.label}>
-                  <span>{item.label}</span>
-                  <strong>{item.value}</strong>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {activeView === "volunteers" && (
-          <div className="panel-card">
-            <div className="panel-head">
-              <h2 className="with-icon"><FiUsers /> Volunteer Totals</h2>
-              <span>Today</span>
-            </div>
-            <div className="metric-grid">
-              {volunteerTotals.map((item) => (
-                <div key={item.label}>
-                  <span>{item.label}</span>
-                  <strong>{item.value}</strong>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {activeView === "pos" && (
-          <div className="panel-card">
-            <div className="panel-head">
-              <h2 className="with-icon"><FiShoppingCart /> Record Sale</h2>
-              <span>Register</span>
-            </div>
-            <form className="session-form" onSubmit={handleSaleSubmit}>
-              <label>
-                Selected item
-                <input
-                  value={posSelection ? posSelection.name : "None"}
-                  placeholder="Select an item"
-                  readOnly
-                />
-              </label>
-              <label>
-                Sale price
-                <input
-                  value={posPrice}
-                  onChange={(event) => setPosPrice(event.target.value)}
-                  placeholder={posSelection?.price || "$0.00"}
-                />
-              </label>
-              {posMessage ? <p className="pos-message">{posMessage}</p> : null}
-              <button className="primary" type="submit">
-                Process sale
-              </button>
-            </form>
-          </div>
-        )}
-      </aside>
+      ) : null}
       {panelOpen ? (
         <button
           className="panel-scrim"
@@ -2252,6 +2139,7 @@ export default function App() {
           onClick={() => setPanelOpen(false)}
         />
       ) : null}
-    </div>
+      </div>
+    </CartProvider>
   );
 }
